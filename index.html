@@ -233,8 +233,11 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
   }
 
   // ---- camera state ------------------------------------------------------
-  var state = { yaw: 0.7, pitch: 0.35, zoom: 1 };
-  var DEFAULT_STATE = { yaw: 0.7, pitch: 0.35, zoom: 1 };
+  // Default: face-on RA/Dec (looking straight down the distance axis), with
+  // RA horizontal and Dec vertical (increasing up) -- proper sky-map framing.
+  var FACE_ON_PITCH = -Math.PI / 2;
+  var state = { yaw: 0, pitch: FACE_ON_PITCH, zoom: 1 };
+  var DEFAULT_STATE = { yaw: 0, pitch: FACE_ON_PITCH, zoom: 1 };
 
   function currentTheme() {
     var attr = document.documentElement.getAttribute('data-theme');
@@ -289,8 +292,12 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
     }
   }
 
+  // RA ticks are listed high-to-low (not low-to-high like the other two axes):
+  // the data points themselves are mirrored (x = -norm(ra)) to put east/larger
+  // RA on the left, sky-convention style, so the tick labels have to walk the
+  // same direction along the box edge or they'd sit next to the wrong value.
   var AXIS_TICKS = {
-    x: [RA_MIN, (RA_MIN + RA_MAX) / 2, RA_MAX],
+    x: [RA_MAX, (RA_MIN + RA_MAX) / 2, RA_MIN],
     y: [DIST_MIN, (DIST_MIN + DIST_MAX) / 2, DIST_MAX],
     z: [DEC_MIN, (DEC_MIN + DEC_MAX) / 2, DEC_MAX]
   };
@@ -308,7 +315,9 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
     });
     ctx.stroke();
 
-    // Axis labels at the low corner (-1,-1,-1) extending along each axis
+    // Axis labels: each axis's edge (and its name label) anchors to a
+    // different pair of cube corners, so the three tick sequences never
+    // converge on the same point and overlap into unreadable text.
     ctx.font = '11px ' + getComputedStyle(document.body).getPropertyValue('--font-mono');
     ctx.fillStyle = textColor;
 
@@ -322,17 +331,17 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
       });
     }
     labelAxis([0, -1, -1], 0, AXIS_TICKS.x, function (v) { return v.toFixed(0) + '°'; });
-    labelAxis([-1, 0, -1], 1, AXIS_TICKS.y, function (v) { return v.toFixed(0) + ' kpc'; });
-    labelAxis([-1, -1, 0], 2, AXIS_TICKS.z, function (v) { return v.toFixed(0) + '°'; });
+    labelAxis([1, 1, 0], 2, AXIS_TICKS.z, function (v) { return v.toFixed(0) + '°'; });
+    labelAxis([-1, 0, 1], 1, AXIS_TICKS.y, function (v) { return v.toFixed(0) + ' kpc'; });
 
     ctx.font = '10px ' + getComputedStyle(document.body).getPropertyValue('--font-body');
     ctx.fillStyle = textColor;
     var raLbl = project({ x: 0, y: -1.28, z: -1 }, w, h);
     ctx.fillText('RA', raLbl.sx, raLbl.sy);
-    var distLbl = project({ x: -1, y: 0, z: -1.28 }, w, h);
-    ctx.fillText('Distance', distLbl.sx, distLbl.sy);
-    var decLbl = project({ x: -1, y: -1, z: 0.28 }, w, h);
+    var decLbl = project({ x: 1, y: 1.28, z: 0 }, w, h);
     ctx.fillText('Dec', decLbl.sx, decLbl.sy);
+    var distLbl = project({ x: -1, y: 0, z: 1.28 }, w, h);
+    ctx.fillText('Distance', distLbl.sx, distLbl.sy);
   }
 
   // ---- main draw -------------------------------------------------------------
@@ -412,7 +421,7 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
       var dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
       state.yaw += dx * 0.008;
-      state.pitch = Math.max(-1.45, Math.min(1.45, state.pitch - dy * 0.008));
+      state.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, state.pitch - dy * 0.008));
       requestDraw();
     } else {
       handleHover(e);
