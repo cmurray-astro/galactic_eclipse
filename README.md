@@ -1,7 +1,7 @@
 # SMC Cepheids in Three Dimensions
 
 Interactive 3D viewer of SMC classical Cepheid positions and NIR Wesenheit
-PL distances, split by the four period–age bins from Table 1 of Murray,
+PL distances, split by the four period–age bins from Table 1 of
 *The Small Magellanic Cloud is Growing Deeper with Age*.
 
 Live: https://cmurray-astro.github.io/galactic_eclipse/
