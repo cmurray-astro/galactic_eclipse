@@ -252,6 +252,12 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
   // ---- projection ----------------------------------------------------------
   var cached = []; // last-drawn screen points for hit testing
 
+  // Orthographic projection: screen position depends only on the rotated
+  // x2/y2, never on depth (z2). A real perspective camera makes even an
+  // exactly face-on cube render as a distorted frustum (near/far corners
+  // displace toward a vanishing point), which is exactly wrong for "proper
+  // astronomical plotting" -- real sky-chart tools (DS9, Aladin, WCS plots)
+  // are all orthographic. z2 is kept only for painter's-algorithm draw order.
   function project(p, w, h) {
     var cosY = Math.cos(state.yaw), sinY = Math.sin(state.yaw);
     var x1 = p.x * cosY + p.z * sinY;
@@ -263,16 +269,13 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
     var z2 = y1 * sinP + z1 * cosP;
     var x2 = x1;
 
-    var camDist = 3.4;
-    var denom = camDist + z2;
-    var scale = camDist / denom;
     var base = Math.min(w, h) * 0.30 * state.zoom;
 
     return {
-      sx: w / 2 + x2 * scale * base,
-      sy: h / 2 - y2 * scale * base,
+      sx: w / 2 + x2 * base,
+      sy: h / 2 - y2 * base,
       z2: z2,
-      scale: scale
+      scale: 1
     };
   }
 
@@ -321,27 +324,38 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
     ctx.font = '11px ' + getComputedStyle(document.body).getPropertyValue('--font-mono');
     ctx.fillStyle = textColor;
 
-    function labelAxis(fixed, varyIdx, vals, fmt) {
+    // Each axis's ticks are offset outward in a direction perpendicular to
+    // that axis (down for RA, left for Dec, up-right for Distance) so that
+    // even when two axes' edges meet at the same cube corner -- which they
+    // always will where RA meets Dec, exactly like a normal chart's origin
+    // -- the label TEXT diverges instead of overlapping.
+    function labelAxis(fixed, varyIdx, vals, fmt, dx, dy, align) {
+      ctx.textAlign = align || 'left';
       vals.forEach(function (val, i) {
         var t = i / (vals.length - 1) * 2 - 1;
         var c = fixed.slice();
         c[varyIdx] = t;
         var pr = project({ x: c[0], y: c[1], z: c[2] }, w, h);
-        ctx.fillText(fmt(val), pr.sx + 4, pr.sy + 4);
+        ctx.fillText(fmt(val), pr.sx + dx, pr.sy + dy);
       });
+      ctx.textAlign = 'left';
     }
-    labelAxis([0, -1, -1], 0, AXIS_TICKS.x, function (v) { return v.toFixed(0) + '°'; });
-    labelAxis([1, 1, 0], 2, AXIS_TICKS.z, function (v) { return v.toFixed(0) + '°'; });
-    labelAxis([-1, 0, 1], 1, AXIS_TICKS.y, function (v) { return v.toFixed(0) + ' kpc'; });
+    labelAxis([0, -1, -1], 0, AXIS_TICKS.x, function (v) { return v.toFixed(0) + '°'; }, 0, 16, 'center');
+    labelAxis([-1, 1, 0], 2, AXIS_TICKS.z, function (v) { return v.toFixed(0) + '°'; }, -8, 4, 'right');
+    labelAxis([1, 0, 1], 1, AXIS_TICKS.y, function (v) { return v.toFixed(0) + ' kpc'; }, 8, -6, 'left');
 
     ctx.font = '10px ' + getComputedStyle(document.body).getPropertyValue('--font-body');
     ctx.fillStyle = textColor;
-    var raLbl = project({ x: 0, y: -1.28, z: -1 }, w, h);
-    ctx.fillText('RA', raLbl.sx, raLbl.sy);
-    var decLbl = project({ x: 1, y: 1.28, z: 0 }, w, h);
-    ctx.fillText('Dec', decLbl.sx, decLbl.sy);
-    var distLbl = project({ x: -1, y: 0, z: 1.28 }, w, h);
-    ctx.fillText('Distance', distLbl.sx, distLbl.sy);
+    ctx.textAlign = 'center';
+    var raLbl = project({ x: 0, y: -1, z: -1 }, w, h);
+    ctx.fillText('RA', raLbl.sx, raLbl.sy + 32);
+    ctx.textAlign = 'right';
+    var decLbl = project({ x: -1, y: 1, z: 0 }, w, h);
+    ctx.fillText('Dec', decLbl.sx - 26, decLbl.sy);
+    ctx.textAlign = 'left';
+    var distLbl = project({ x: 1, y: 0, z: 1 }, w, h);
+    ctx.fillText('Distance', distLbl.sx + 22, distLbl.sy - 16);
+    ctx.textAlign = 'left';
   }
 
   // ---- main draw -------------------------------------------------------------
@@ -371,7 +385,7 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
 
     for (var j = 0; j < all.length; j++) {
       var d = all[j];
-      var r = SIZES[d.bin] * Math.max(0.55, Math.min(1.6, d.scale));
+      var r = SIZES[d.bin];
       ctx.globalAlpha = ALPHAS[d.bin];
       ctx.fillStyle = colors[d.bin];
       drawMarker(d.bin, d.sx, d.sy, r);
