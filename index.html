@@ -88,13 +88,21 @@
     padding: 0.3rem 0.55rem; border-radius: 6px; pointer-events: none; z-index: 2;
   }
 
-  .reset-btn {
-    position: absolute; top: 0.75rem; right: 0.9rem; font: inherit; font-size: 0.72rem;
+  .controls {
+    position: absolute; top: 0.75rem; right: 0.9rem; z-index: 2;
+    display: flex; gap: 0.4rem;
+  }
+  .btn {
+    font: inherit; font-size: 0.72rem;
     letter-spacing: 0.02em; color: var(--ink-muted); background: var(--surface-2);
     border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.6rem;
-    cursor: pointer; z-index: 2;
+    cursor: pointer;
   }
-  .reset-btn:hover { color: var(--ink); border-color: var(--accent); }
+  .btn:hover { color: var(--ink); border-color: var(--accent); }
+  .btn.active {
+    color: var(--accent-ink); border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  }
 
   .tooltip {
     position: absolute; pointer-events: none; z-index: 3; font-size: 0.76rem;
@@ -158,7 +166,10 @@
   <div class="stage">
     <div class="canvas-wrap">
       <div class="hint">drag &middot; scroll &middot; hover a point</div>
-      <button class="reset-btn" id="resetBtn">Reset view</button>
+      <div class="controls">
+        <button class="btn" id="aspectBtn" title="Toggle whether a degree of RA and a degree of Dec span the same distance on screen">Equal aspect</button>
+        <button class="btn" id="resetBtn">Reset view</button>
+      </div>
       <canvas id="scene"></canvas>
       <div class="tooltip" id="tooltip"></div>
     </div>
@@ -199,25 +210,34 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
   var DEC_MIN = -76.5, DEC_MAX = -69;
   var DIST_MIN = 44, DIST_MAX = 82;
 
-  // RA and Dec share one degrees-per-unit scale (equal-aspect sky plot) so a
-  // degree of RA and a degree of Dec occupy the same screen distance -- the
-  // wider axis (RA) fills the full ±1 box, the narrower one (Dec) fills a
-  // proportionally smaller slice instead of being stretched to match.
+  // RA and Dec spans, used to scale one against the other when equal-aspect
+  // mode is on (a degree of RA and a degree of Dec occupy the same screen
+  // distance -- the wider axis fills the full ±1 box, the narrower one fills
+  // a proportionally smaller slice instead of being stretched to match).
   var RA_SPAN = RA_MAX - RA_MIN, DEC_SPAN = DEC_MAX - DEC_MIN;
   var SKY_SPAN = Math.max(RA_SPAN, DEC_SPAN);
-  var RA_EXT = RA_SPAN / SKY_SPAN, DEC_EXT = DEC_SPAN / SKY_SPAN;
+
+  // Toggled by the "Equal aspect" button. Off = RA and Dec each independently
+  // stretched to fill the box (original behavior, default). On = true degree scale.
+  var equalAspect = false;
+  function skyExt() {
+    return equalAspect
+      ? { ra: RA_SPAN / SKY_SPAN, dec: DEC_SPAN / SKY_SPAN }
+      : { ra: 1, dec: 1 };
+  }
 
   function norm(v, lo, hi) { return ((v - lo) / (hi - lo)) * 2 - 1; }
-  function normSky(v, lo, hi) { return (v - (lo + hi) / 2) / (SKY_SPAN / 2); }
 
-  // Precompute normalized points per bin: {x,y,z, ra,dec,dist}
+  // Precompute normalized points per bin: {x,y,z, ra,dec,dist}. x/z are raw
+  // ±1 per-axis values -- the RA/Dec aspect scaling is applied in project()
+  // so it can be toggled at draw time without recomputing this array.
   // data axes -> x:RA (flipped for sky convention), y:Distance (up), z:Dec
   var bins = RAW.map(function (pts) {
     return pts.map(function (p) {
       return {
-        x: -normSky(p[0], RA_MIN, RA_MAX),
+        x: -norm(p[0], RA_MIN, RA_MAX),
         y: norm(p[2], DIST_MIN, DIST_MAX),
-        z: normSky(p[1], DEC_MIN, DEC_MAX),
+        z: norm(p[1], DEC_MIN, DEC_MAX),
         ra: p[0], dec: p[1], dist: p[2]
       };
     });
@@ -268,9 +288,12 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
   // astronomical plotting" -- real sky-chart tools (DS9, Aladin, WCS plots)
   // are all orthographic. z2 is kept only for painter's-algorithm draw order.
   function project(p, w, h) {
+    var ext = skyExt();
+    var px = p.x * ext.ra, pz = p.z * ext.dec;
+
     var cosY = Math.cos(state.yaw), sinY = Math.sin(state.yaw);
-    var x1 = p.x * cosY + p.z * sinY;
-    var z1 = -p.x * sinY + p.z * cosY;
+    var x1 = px * cosY + pz * sinY;
+    var z1 = -px * sinY + pz * cosY;
     var y1 = p.y;
 
     var cosP = Math.cos(state.pitch), sinP = Math.sin(state.pitch);
@@ -289,13 +312,13 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
   }
 
   // ---- axis wireframe box ---------------------------------------------------
-  // Box footprint follows RA_EXT/DEC_EXT (not a plain unit cube) so the box
-  // itself is the equal-aspect sky rectangle, not just the points inside it.
+  // Raw ±1 cube -- project() applies the RA/Dec aspect scaling, so the box
+  // reshapes itself automatically when equalAspect is toggled.
   var CORNERS = [];
   for (var xi = -1; xi <= 1; xi += 2)
     for (var yi = -1; yi <= 1; yi += 2)
       for (var zi = -1; zi <= 1; zi += 2)
-        CORNERS.push([xi * RA_EXT, yi, zi * DEC_EXT]);
+        CORNERS.push([xi, yi, zi]);
 
   var EDGES = [];
   for (var a = 0; a < CORNERS.length; a++) {
@@ -340,11 +363,10 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
     // even when two axes' edges meet at the same cube corner -- which they
     // always will where RA meets Dec, exactly like a normal chart's origin
     // -- the label TEXT diverges instead of overlapping.
-    function labelAxis(fixed, varyIdx, vals, fmt, dx, dy, align, ext) {
-      ext = ext === undefined ? 1 : ext;
+    function labelAxis(fixed, varyIdx, vals, fmt, dx, dy, align) {
       ctx.textAlign = align || 'left';
       vals.forEach(function (val, i) {
-        var t = (i / (vals.length - 1) * 2 - 1) * ext;
+        var t = i / (vals.length - 1) * 2 - 1;
         var c = fixed.slice();
         c[varyIdx] = t;
         var pr = project({ x: c[0], y: c[1], z: c[2] }, w, h);
@@ -352,20 +374,20 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
       });
       ctx.textAlign = 'left';
     }
-    labelAxis([0, -1, -DEC_EXT], 0, AXIS_TICKS.x, function (v) { return v.toFixed(0) + '°'; }, 0, 16, 'center', RA_EXT);
-    labelAxis([-RA_EXT, 1, 0], 2, AXIS_TICKS.z, function (v) { return v.toFixed(0) + '°'; }, -8, 4, 'right', DEC_EXT);
-    labelAxis([RA_EXT, 0, DEC_EXT], 1, AXIS_TICKS.y, function (v) { return v.toFixed(0) + ' kpc'; }, 8, -6, 'left');
+    labelAxis([0, -1, -1], 0, AXIS_TICKS.x, function (v) { return v.toFixed(0) + '°'; }, 0, 16, 'center');
+    labelAxis([-1, 1, 0], 2, AXIS_TICKS.z, function (v) { return v.toFixed(0) + '°'; }, -8, 4, 'right');
+    labelAxis([1, 0, 1], 1, AXIS_TICKS.y, function (v) { return v.toFixed(0) + ' kpc'; }, 8, -6, 'left');
 
     ctx.font = '10px ' + getComputedStyle(document.body).getPropertyValue('--font-body');
     ctx.fillStyle = textColor;
     ctx.textAlign = 'center';
-    var raLbl = project({ x: 0, y: -1, z: -DEC_EXT }, w, h);
+    var raLbl = project({ x: 0, y: -1, z: -1 }, w, h);
     ctx.fillText('RA', raLbl.sx, raLbl.sy + 32);
     ctx.textAlign = 'right';
-    var decLbl = project({ x: -RA_EXT, y: 1, z: 0 }, w, h);
+    var decLbl = project({ x: -1, y: 1, z: 0 }, w, h);
     ctx.fillText('Dec', decLbl.sx - 26, decLbl.sy);
     ctx.textAlign = 'left';
-    var distLbl = project({ x: RA_EXT, y: 0, z: DEC_EXT }, w, h);
+    var distLbl = project({ x: 1, y: 0, z: 1 }, w, h);
     ctx.fillText('Distance', distLbl.sx + 22, distLbl.sy - 16);
     ctx.textAlign = 'left';
   }
@@ -463,6 +485,13 @@ window.CEPHEID_DATA = [[[5.033,-74.548,67.759],[5.172,-74.516,66.453],[5.269,-73
 
   document.getElementById('resetBtn').addEventListener('click', function () {
     state.yaw = DEFAULT_STATE.yaw; state.pitch = DEFAULT_STATE.pitch; state.zoom = DEFAULT_STATE.zoom;
+    requestDraw();
+  });
+
+  var aspectBtn = document.getElementById('aspectBtn');
+  aspectBtn.addEventListener('click', function () {
+    equalAspect = !equalAspect;
+    aspectBtn.classList.toggle('active', equalAspect);
     requestDraw();
   });
 
